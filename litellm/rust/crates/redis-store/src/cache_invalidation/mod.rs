@@ -68,7 +68,7 @@ impl CacheInvalidation {
         let cache_key = invalidation.cache_key().to_owned();
         self.spawn(1, async move {
             if let Err(error) = client.publish(&channel, &[payload]).await {
-                tracing::warn!("auth cache invalidation publish for {cache_key} failed: {error}");
+                tracing::warn!("auth cache invalidation publish for {cache_key:?} failed: {error}");
             }
         })
         .is_some()

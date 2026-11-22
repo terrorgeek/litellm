@@ -174,7 +174,7 @@ class _Lines(logging.Handler):
         self.lines = (*self.lines, record.getMessage())
 
 
-def test_a_publish_redis_refuses_is_logged_with_its_cache_key() -> None:
+def test_a_publish_redis_refuses_is_logged_on_one_line_with_its_cache_key_escaped() -> None:
     invalidation: Final = connect_invalidation(
         connect(RedisCache(host="127.0.0.1", port=1)),
         None,
@@ -186,16 +186,15 @@ def test_a_publish_redis_refuses_is_logged_with_its_cache_key() -> None:
     handler: Final = _Lines()
     verbose_logger.addHandler(handler)
     try:
-        assert invalidation.publish("team_id:t-1")
+        assert invalidation.publish("team_alias:a\nforged")
         deadline: Final = time.monotonic() + 10
         while not handler.lines and time.monotonic() < deadline:
             time.sleep(0.05)
     finally:
         verbose_logger.removeHandler(handler)
 
-    assert any(line.startswith("auth cache invalidation publish for team_id:t-1 failed") for line in handler.lines), (
-        handler.lines
-    )
+    expected: Final = 'auth cache invalidation publish for "team_alias:a\\nforged" failed'
+    assert any(line.startswith(expected) and "\n" not in line for line in handler.lines), handler.lines
 
 
 class _TargetRecordingChannel(FakeChannel):
