@@ -12,7 +12,6 @@ use std::{
 use futures_util::{StreamExt, stream::BoxStream};
 use litellm_redis_client::RedisClient;
 use tokio::{runtime::Handle, sync::Semaphore};
-use tracing::instrument::WithSubscriber;
 
 pub use self::keys::channel;
 pub use self::types::Invalidation;
@@ -123,17 +122,12 @@ impl CacheInvalidation {
         }
         let in_flight = self.in_flight.clone();
         let waiting = self.pending.clone();
-        Some(
-            self.runtime.spawn(
-                async move {
-                    if let Ok(_permit) = in_flight.acquire_owned().await {
-                        publish.await;
-                    }
-                    waiting.fetch_sub(1, Ordering::AcqRel);
-                }
-                .with_current_subscriber(),
-            ),
-        )
+        Some(self.runtime.spawn(async move {
+            if let Ok(_permit) = in_flight.acquire_owned().await {
+                publish.await;
+            }
+            waiting.fetch_sub(1, Ordering::AcqRel);
+        }))
     }
 }
 

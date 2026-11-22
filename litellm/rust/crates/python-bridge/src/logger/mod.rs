@@ -193,10 +193,61 @@ fn report<T: Default>(py: Python<'_>, result: PyResult<T>) -> T {
     }
 }
 
+fn litellm_target(target: &str) -> bool {
+    target.starts_with("litellm_") || target.starts_with("_native::")
+}
+
+fn deliver(record: &Record, correlation: (&str, &str)) {
+    Python::try_attach(|py| {
+        report(
+            py,
+            py.import(MODULE).and_then(|module| {
+                module
+                    .call_method1(
+                        "emit",
+                        (
+                            level(record.metadata.level()),
+                            &record.message,
+                            record.metadata.file().unwrap_or_default(),
+                            record.metadata.line().unwrap_or_default(),
+                            record.metadata.target(),
+                            Pythonized(&record.fields),
+                            correlation,
+                        ),
+                    )
+                    .map(|_| ())
+            }),
+        );
+    });
+}
+
+/// The sink of a thread no call scoped, such as a detached task on the native runtime. Python rechecks the level, and
+/// warnings are the floor so a disabled debug line never costs a runtime worker the GIL.
+struct Unscoped;
+
+impl Unscoped {
+    fn accepts(level: &Level, target: &str) -> bool {
+        *level <= Level::WARN && litellm_target(target)
+    }
+}
+
+impl Sink for Unscoped {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        Self::accepts(metadata.level(), metadata.target())
+    }
+
+    fn emit(&self, record: &Record) {
+        deliver(record, ("", ""));
+    }
+}
+
+pub(crate) fn unscoped() -> Logger {
+    Logger::new(Unscoped)
+}
+
 impl Sink for PythonSink {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        if !metadata.target().starts_with("litellm_") && !metadata.target().starts_with("_native::")
-        {
+        if !litellm_target(metadata.target()) {
             return false;
         }
         let level = level(metadata.level());
@@ -210,27 +261,7 @@ impl Sink for PythonSink {
     }
 
     fn emit(&self, record: &Record) {
-        Python::try_attach(|py| {
-            report(
-                py,
-                py.import(MODULE).and_then(|module| {
-                    module
-                        .call_method1(
-                            "emit",
-                            (
-                                level(record.metadata.level()),
-                                &record.message,
-                                record.metadata.file().unwrap_or_default(),
-                                record.metadata.line().unwrap_or_default(),
-                                record.metadata.target(),
-                                Pythonized(&record.fields),
-                                (&self.correlation.0, &self.correlation.1),
-                            ),
-                        )
-                        .map(|_| ())
-                }),
-            );
-        });
+        deliver(record, (&self.correlation.0, &self.correlation.1));
     }
 }
 

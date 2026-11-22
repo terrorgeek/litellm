@@ -5,6 +5,7 @@ use litellm_host::{
     protocol::Protocol,
 };
 
+use litellm_tracing::Level;
 use pyo3::{prelude::*, types::PyDict};
 
 struct DiagnosticMachine;
@@ -183,6 +184,20 @@ fn call_levels_ask_python_once_per_level(#[case] level: u8, #[values(true, false
     assert_eq!(levels.enabled(level, false, query), enabled);
     assert_eq!(levels.enabled(level, false, query), enabled);
     assert_eq!(queries.get(), 1);
+}
+
+#[rstest::rstest]
+#[case::error(Level::ERROR, "litellm_redis_store::cache_invalidation", true)]
+#[case::warning(Level::WARN, "_native::redis::events", true)]
+#[case::info(Level::INFO, "litellm_redis_store::cache_invalidation", false)]
+#[case::debug(Level::DEBUG, "litellm_redis_store::cache_invalidation", false)]
+#[case::dependency(Level::WARN, "hyper::proto::h1", false)]
+fn a_thread_no_call_scoped_logs_only_litellm_warnings_and_errors(
+    #[case] level: Level,
+    #[case] target: &str,
+    #[case] accepted: bool,
+) {
+    assert_eq!(super::Unscoped::accepts(&level, target), accepted);
 }
 
 #[rstest::rstest]
